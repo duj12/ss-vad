@@ -1,0 +1,22 @@
+data: data/ZhEn_1w/hdf5_mfcc_noisy/train.csv
+label: data/ZhEn_1w/softlabels/train.csv
+hard_label: data/ZhEn_1w/hardlabels/train.label
+batch_size: 64
+data_args:
+    mode: Null
+num_workers: 8
+optimizer: AdamW
+optimizer_args:
+    lr: 0.001
+scheduler_args:
+    patience: 10
+    factor: 0.1
+early_stop: 10
+epochs: 25
+itercv: 10000
+save: best
+model: CRNN
+model_args: {}
+outputpath: experiments/
+transforms: [timemask, freqmask]
+loss: ClipFrameHardSoftBCELoss #FrameBCELoss
