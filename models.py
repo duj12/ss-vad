@@ -4,8 +4,8 @@ from pathlib import Path
 import torch.nn as nn
 
 
-def crnn(inputdim=64, outputdim=527, pretrained_from='balanced.pth'):
-    model = CRNN(inputdim, outputdim)
+def crnn(inputdim=64, outputdim=527, pretrained_from='balanced.pth', **kwargs):
+    model = CRNN(inputdim, outputdim, **kwargs)
     if pretrained_from:
         state = torch.load(pretrained_from,
                            map_location='cpu')
@@ -141,13 +141,17 @@ class CRNN(nn.Module):
 
         self.gru = nn.GRU(rnn_input_dim,
                           128,
-                          bidirectional=True,
+                          bidirectional=kwargs.get(
+            'gru_bidirection', True),
                           batch_first=True)
         self.temp_pool = parse_poolingfunction(kwargs.get(
             'temppool', 'linear'),
-                                               inputdim=256,
+                                               inputdim=256 if kwargs.get(
+            'gru_bidirection', True) else 128,
                                                outputdim=outputdim)
-        self.outputlayer = nn.Linear(256, outputdim)
+        self.outputlayer = nn.Linear(256 if kwargs.get(
+            'gru_bidirection', True) else 128,
+                                     outputdim)
         self.features.apply(init_weights)
         self.outputlayer.apply(init_weights)
 
@@ -166,6 +170,21 @@ class CRNN(nn.Module):
                 align_corners=False).transpose(1, 2)
         decision = self.temp_pool(x, decision_time).clamp(1e-7, 1.).squeeze(1)
         return decision, decision_time
+
+    def forward_stream_vad(self, x, h, upsample=True):
+        batch, time, dim = x.shape
+        x = x.unsqueeze(1)
+        x = self.features(x)
+        x = x.transpose(1, 2).contiguous().flatten(-2)
+        x, h = self.gru(x, h)
+        vad_post = torch.sigmoid(self.outputlayer(x)).clamp(1e-7, 1.)
+        if upsample:
+            vad_post = torch.nn.functional.interpolate(
+                vad_post.transpose(1, 2),
+                time,
+                mode='linear',
+                align_corners=False).transpose(1, 2)
+        return vad_post, h
 
 
 class CNN10(nn.Module):

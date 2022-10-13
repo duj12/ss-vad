@@ -58,18 +58,18 @@ class TrainHDF5Dataset(tdata.Dataset):
         h5file: str = self._h5filedict[fname]
         labelh5file: str = self._h5labeldict[fname]
         hard_txt_label: str = self._txthardlabel[fname]
-        if not h5file in self._datasetcache:
-            self._datasetcache[h5file] = File(h5file, 'r')
-        if not labelh5file in self._labelcache:
-            self._labelcache[labelh5file] = File(labelh5file, 'r')
+        #if not h5file in self._datasetcache:
+        #    self._datasetcache[h5file] = File(h5file, 'r')
+        #if not labelh5file in self._labelcache:
+        #    self._labelcache[labelh5file] = File(labelh5file, 'r')
 
-        data = self._datasetcache[h5file][f"{fname}"][()]
-        speech_target = self._labelcache[labelh5file][f"{fname}/speech"][()]
-        noise_target = self._labelcache[labelh5file][f"{fname}/noise"][()]
-        speech_clip_target = self._labelcache[labelh5file][
-            f"{fname}/clipspeech"][()]
-        noise_clip_target = self._labelcache[labelh5file][
-            f"{fname}/clipnoise"][()]
+        with File(h5file, 'r') as store:
+            data = store[f"{fname}"][()]
+        with File(labelh5file, 'r') as store:
+            speech_target = store[f"{fname}/speech"][()]
+            noise_target = store[f"{fname}/noise"][()]
+            speech_clip_target = store[f"{fname}/clipspeech"][()]
+            noise_clip_target = store[f"{fname}/clipnoise"][()]
 
         noise_clip_target = np.max(noise_clip_target)  # take max around axis
         if self._label_type == 'hard':
@@ -108,6 +108,16 @@ class TrainHDF5Dataset(tdata.Dataset):
             target_hard = target_hard[target_inds]
         assert (data.size(0) == target_hard.size(0))
 
+        hyp_sz = data.size(0)
+        ref_sz = target_time.size(0)
+        ref2hyp_ratio = float(ref_sz / hyp_sz)
+        if (hyp_sz != ref_sz):  # 对标签进行采样
+            target_inds = (np.arange(hyp_sz) * ref2hyp_ratio).astype(np.int)
+            # 这里为了避免对齐之后的标签越界，将超过标签长度的idx替换成最后一个标签序号
+            target_inds[target_inds >= ref_sz] = ref_sz - 1
+            target_time = target_time[target_inds]
+        assert (data.size(0) == target_time.size(0))
+
         return data, target_time, target_clip, target_hard, fname
 
 
@@ -128,7 +138,7 @@ class HDF5Dataset(tdata.Dataset):
         # IF none is passed still use no transform at all
         self._transform = transform
         with File(self._h5file, 'r') as store, File(self._h5label,
-                                                    'r') as labelstore:
+                                                    'r') as store:
             self.datadim = store[self.fnames[0]].shape[-1]
 
     def __len__(self):

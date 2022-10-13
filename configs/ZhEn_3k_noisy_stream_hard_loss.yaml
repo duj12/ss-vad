@@ -1,0 +1,29 @@
+data: data/ZhEn_1w/hdf5_mfcc_noisy/train.csv
+label: data/ZhEn_1w/softlabels/train.csv
+hard_label: data/ZhEn_1w/hardlabels/train.label
+batch_size: 256
+data_args:
+    mode: Null
+num_workers: 8
+optimizer: AdamW
+optimizer_args:
+    lr: 0.001
+scheduler_args:
+    patience: 10
+    factor: 0.1
+early_stop: 10
+epochs: 100
+itercv: 2000
+iter_save_ckpt: 4000
+save: best
+model: CRNN
+model_args: {
+                gru_bidirection: False
+}
+outputpath: experiments/CRNN/ZhEn-3k-0.8noisy-vad-stream-hardloss
+transforms: [timemask, freqmask]
+loss: ClipFrameHardSoftBCELoss #FrameBCELoss
+soft_clip_label_weight: 0.0
+soft_label_weight: 0.0
+hard_label_weight: 1.0
+#pretrained: experiments/CRNN/ZhEn-3k-0.8noisy-vad/run_model_loss=-1.0095.pt

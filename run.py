@@ -62,6 +62,9 @@ class Runner(object):
                                       device=DEVICE,
                                       non_blocking=True)
         clip_level_output, frame_level_output = model(inputs)
+        # make sure frame_level object have the same frame length
+
+
         return clip_level_output, frame_level_output, targets_time, targets_clip, targets_hard, lengths
 
     @staticmethod
@@ -78,16 +81,19 @@ class Runner(object):
         """
 
         config_parameters = utils.parse_config_or_kwargs(config, **kwargs)
-        outputdir = os.path.join(
-            config_parameters['outputpath'], config_parameters['model'],
-            "{}_{}".format(
-                datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%m'),
-                uuid.uuid1().hex))
+        if not "outputpath" in config_parameters:
+            outputdir = os.path.join(
+                "experiments", config_parameters['model'],
+                "{}_{}".format(
+                    datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%m'),
+                    uuid.uuid1().hex))
+        else:
+            outputdir = config_parameters["outputpath"]
         # Early init because of creating dir
         checkpoint_handler = ModelCheckpoint(
             outputdir,
             'run',
-            n_saved=3,
+            n_saved=10,
             require_empty=False,
             create_dir=True,
             score_function=self._negative_loss,
@@ -173,7 +179,11 @@ class Runner(object):
         if DEVICE.type != 'cpu' and torch.cuda.device_count() > 1:
             logger.info("Using {} GPUs!".format(torch.cuda.device_count()))
             model = torch.nn.DataParallel(model)
-        criterion = getattr(losses, config_parameters['loss'])().to(DEVICE)
+        criterion = getattr(losses, config_parameters['loss'])(
+            config_parameters['soft_clip_label_weight'],
+            config_parameters['soft_label_weight'],
+            config_parameters['hard_label_weight'],
+        ).to(DEVICE)
 
         def _train_batch(_, batch):
             model.train()
@@ -206,46 +216,44 @@ class Runner(object):
             return y_pred.contiguous(), y_hard.contiguous()
 
         metrics = {
-            'Loss': losses.Loss(
-                criterion),  #reimplementation of Loss, supports 3 way loss 
+            'Loss': losses.Loss(criterion),  #reimplementation of Loss, supports 3 way loss
             'Precision': Precision(thresholded_output_transform),
             'Recall': Recall(thresholded_output_transform),
             'Accuracy': Accuracy(thresholded_output_transform),
         }
         train_engine = Engine(_train_batch)
         inference_engine = Engine(_inference)
-        for name, metric in metrics.items():
+        for name, metric in metrics.items():   #这里没有起到作用？
             metric.attach(inference_engine, name)
 
         def compute_metrics(engine):
             inference_engine.run(cvdataloader)
             results = inference_engine.state.metrics
             output_str_list = [
-                "Validation Results - Epoch : {:<5}".format(engine.state.epoch)
+                "Val Result - Epoch: {} Iteration: {} ".format(engine.state.epoch, engine.state.iteration)
             ]
             for metric in metrics:
-                output_str_list.append("{} {:<5.2f}".format(
-                    metric, results[metric]))
+                output_str_list.append("{} {:<5.2f}".format(metric, results[metric]))
             logger.info(" ".join(output_str_list))
             pbar.n = pbar.last_print_n = 0
 
         pbar = ProgressBar(persist=False)
         pbar.attach(train_engine)
 
-        train_engine.add_event_handler(Events.ITERATION_COMPLETED(every=5000),
-                                       compute_metrics)
+        #train_engine.add_event_handler(Events.ITERATION_COMPLETED(every=config_parameters['iter_cv']), compute_metrics)
         train_engine.add_event_handler(Events.EPOCH_COMPLETED, compute_metrics)
 
         early_stop_handler = EarlyStopping(
             patience=config_parameters['early_stop'],
             score_function=self._negative_loss,
             trainer=train_engine)
-        inference_engine.add_event_handler(Events.EPOCH_COMPLETED,
-                                           early_stop_handler)
-        inference_engine.add_event_handler(Events.EPOCH_COMPLETED,
-                                           checkpoint_handler, {
-                                               'model': model,
-                                           })
+
+        # inference_engine.add_event_handler(Events.ITERATION_COMPLETED(every=config_parameters['iter_save_ckpt']),
+        #                                    checkpoint_handler, {'model': model})
+        inference_engine.add_event_handler(Events.EPOCH_COMPLETED,  checkpoint_handler, {'model': model})
+        # inference_engine.add_event_handler(Events.ITERATION_COMPLETED(every=config_parameters['iter_cv']),
+        #                                    early_stop_handler)
+        inference_engine.add_event_handler(Events.EPOCH_COMPLETED,  early_stop_handler)
 
         train_engine.run(trainloader, max_epochs=config_parameters['epochs'])
         return outputdir

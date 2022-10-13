@@ -25,12 +25,12 @@ LMS_ARGS = {
 }
 
 #新版模型将帧率改成了80
-# LMS_ARGS = {
-#     'n_fft': 2048,
-#     'n_mels': 64,
-#     'hop_length': int(SAMPLE_RATE * 0.0125),
-#     'win_length': int(SAMPLE_RATE * 0.025)
-# }
+LMS_ARGS_new = {
+    'n_fft': 2048,
+    'n_mels': 64,
+    'hop_length': int(SAMPLE_RATE * 0.0125),
+    'win_length': int(SAMPLE_RATE * 0.025)
+}
 
 DEVICE = 'cpu'
 if torch.cuda.is_available():
@@ -41,7 +41,8 @@ DEVICE = torch.device(DEVICE)
 def extract_feature(wavefilepath, **kwargs):
     _, file_extension = os.path.splitext(wavefilepath)
     if file_extension == '.wav':
-        wav, sr = sf.read(wavefilepath, dtype='float32')
+        #wav, sr = sf.read(wavefilepath, dtype='float32')
+        wav, sr = librosa.read(wavefilepath)   #librosa和soundfile读取得到的数值有细微的差别
     if file_extension == '.mp3':
         wav, sr = librosa.load(wavefilepath)
     elif file_extension not in ['.mp3', '.wav']:
@@ -69,6 +70,43 @@ class OnlineLogMelDataset(torch.utils.data.Dataset):
 
 
 MODELS = {
+    'xmov': {
+        'model': crnn,
+        'outputdim': 2,
+        'encoder': 'labelencoders/students.pth',
+        'pretrained': 'xmov/hard.pt',
+        'resolution': 0.0125
+    },
+    'xmov1': {
+        'model': crnn,
+        'outputdim': 2,
+        'encoder': 'labelencoders/students.pth',
+        'pretrained': 'xmov/hard+soft.pt',
+        'resolution': 0.0125
+    },
+    'xmov0': {
+        'model': crnn,
+        'outputdim': 2,
+        'encoder': 'labelencoders/students.pth',
+        'pretrained': 'xmov/hard+soft+clip.pt',
+        'resolution': 0.0125
+    },
+    'xmov-s': {
+        'model': crnn,
+        'outputdim': 2,
+        'encoder': 'labelencoders/students.pth',
+        'pretrained': 'xmov/stream-hard.pt',
+        'resolution': 0.0125,
+        'gru_bidirection': False
+    },
+    'xmov-s1': {
+        'model': crnn,
+        'outputdim': 2,
+        'encoder': 'labelencoders/students.pth',
+        'pretrained': 'xmov/stream-hard+clip.pt',
+        'resolution': 0.0125,
+        'gru_bidirection': False
+    },
     't1': {
         'model': crnn,
         'outputdim': 527,
@@ -131,12 +169,13 @@ def plot_wav_and_vad(audio, ref, hyp, save_name):
     time1 = np.arange(0, len(hyp))
     time = np.arange(0, len(audio)) * (len(hyp) / len(audio))  #将时间轴映射到标签的数量
     plt.plot(time, audio)
-    if(ref != None):
+    if not ref is None:
         assert(len(hyp)==len(ref))
         plt.plot(time1, ref)
     plt.plot(time1, hyp)
     #plt.show()
     plt.savefig(save_name)
+    plt.close()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -203,7 +242,9 @@ Please download the pretrained models from and try again or set --pretrained_dir
         wavlist = wavlist['filename'].values.tolist()
     elif args.wav:
         wavlist = [args.wav]
-    dset = OnlineLogMelDataset(wavlist, **LMS_ARGS)
+    #dset = OnlineLogMelDataset(wavlist, **LMS_ARGS)
+
+    dset = OnlineLogMelDataset(wavlist, **LMS_ARGS_new)
     dloader = torch.utils.data.DataLoader(dset,
                                           batch_size=1,
                                           num_workers=3,
@@ -215,7 +256,9 @@ Please download the pretrained models from and try again or set --pretrained_dir
     model = model_kwargs_pack['model'](
         outputdim=model_kwargs_pack['outputdim'],
         pretrained_from=pretrained_dir /
-        model_kwargs_pack['pretrained']).to(DEVICE).eval()
+        model_kwargs_pack['pretrained'],
+        gru_bidirection=model_kwargs_pack.get('gru_bidirection', True)
+    ).to(DEVICE).eval()
     encoder = torch.load(pretrained_dir / model_kwargs_pack['encoder'])
     logger.trace(model)
 
@@ -286,7 +329,7 @@ Please download the pretrained models from and try again or set --pretrained_dir
                 ref_sz = (ref.shape)[0]
                 ref2hyp_ratio = float(ref_sz / hyp_sz)
                 if (hyp_sz != ref_sz):  # 对标签进行采样
-                    target_inds = (np.arange(hyp_sz) * ref2hyp_ratio).astype(np.int)
+                    target_inds = (np.arange(hyp_sz) * ref2hyp_ratio).astype(int)
                     # 这里为了避免对齐之后的标签越界，将超过标签长度的idx替换成最后一个标签序号
                     target_inds[target_inds >= ref_sz] = ref_sz - 1
                     ref = ref[target_inds]
@@ -322,7 +365,7 @@ Please download the pretrained models from and try again or set --pretrained_dir
 
         p_miss = 100 * (fn / (fn + tp))
         p_fa = 100 * (fp / (fp + tn))
-        for i in [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 0.7, 0.9]:
+        for i in [0.1, 0.3, 0.5, 0.7, 0.9]:
             mp_fa, mp_miss = metrics.obtain_error_rates(
                 speech_frame_ground_truth, speech_frame_prob_predictions, i)
             tn, fp, fn, tp = metrics.confusion_matrix(

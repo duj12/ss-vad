@@ -35,16 +35,19 @@ class ClipFrameHardSoftBCELoss(nn.Module):
     """docstring for BCELoss
     if we have hard frame_level VAD label, we can add a hardframeloss item
     """
-    def __init__(self):
+    def __init__(self, soft_clip_label_weight=0.5, soft_label_weight=0.5, hard_label_weight=1.0):
         super().__init__()
         self.frameloss = FrameBCELoss()  #this is for soft frame label
         self.cliploss = nn.BCELoss()     #this is for soft clip label
         self.hardframeloss = BCELossWithLabelSmoothing()  # this is for soft frame label
+        self.soft_clip_weight = soft_clip_label_weight
+        self.soft_weight = soft_label_weight
+        self.hard_weight = hard_label_weight
 
     def forward(self, clip_prob, frame_prob, tar_time, tar_clip, tar_hard, length):
-        return 0.5 * self.frameloss(clip_prob, frame_prob, tar_time, tar_clip, tar_hard, length) \
-               + 0.5 * self.cliploss(clip_prob, tar_clip) +   \
-               1.0 * self.hardframeloss(clip_prob, frame_prob, tar_hard)
+        return self.soft_weight * self.frameloss(clip_prob, frame_prob, tar_time, tar_clip, tar_hard, length) \
+               + self.soft_clip_weight * self.cliploss(clip_prob, tar_clip) +   \
+               self.hard_weight * self.hardframeloss(clip_prob, frame_prob, tar_hard)
 
 class BCELossWithLabelSmoothing(nn.Module):
     """docstring for BCELoss"""
