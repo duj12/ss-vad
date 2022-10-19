@@ -42,7 +42,7 @@ def extract_feature(wavefilepath, **kwargs):
     _, file_extension = os.path.splitext(wavefilepath)
     if file_extension == '.wav':
         #wav, sr = sf.read(wavefilepath, dtype='float32')
-        wav, sr = librosa.read(wavefilepath)   #librosa和soundfile读取得到的数值有细微的差别
+        wav, sr = librosa.load(wavefilepath)   #librosa和soundfile读取得到的数值有细微的差别
     if file_extension == '.mp3':
         wav, sr = librosa.load(wavefilepath)
     elif file_extension not in ['.mp3', '.wav']:
